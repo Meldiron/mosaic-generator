@@ -77,8 +77,11 @@
             class="px-4 pt-4 pb-2 text-sm text-gray-500 dark:text-gray-400"
           >
             <ul class="list-disc list-inside">
-              <li>Ensure all images are in PNG format for best results.</li>
-              <li>The target image should be larger than the pool images.</li>
+              <li>
+                Sign in with Shoebox and share one gallery. Every photo in it
+                becomes a tile in the pool.
+              </li>
+              <li>The target photo is one of those gallery photos.</li>
               <li>
                 A diverse pool of images will create more interesting mosaics.
               </li>
@@ -106,59 +109,76 @@
               <h2
                 class="text-xl font-semibold mb-4 text-gray-900 dark:text-white"
               >
-                1. Select Target Photo
+                1. Sign in with Shoebox
               </h2>
-              <input
-                type="file"
-                accept="image/*"
-                @change="handleTargetPhotoUpload"
-                class="mb-4"
-                aria-label="Select target photo"
-              />
-              <div v-if="targetPhoto" class="mb-4 flex justify-center">
-                <img
-                  :src="targetPhoto"
-                  alt="Target Photo"
-                  class="max-w-full h-auto max-h-64 object-contain"
-                />
-              </div>
+              <template v-if="!gallery">
+                <button
+                  @click="signInWithShoebox"
+                  :disabled="isLoadingGallery"
+                  class="w-full bg-gray-900 hover:bg-black dark:bg-white dark:hover:bg-gray-200 text-white dark:text-gray-900 font-bold py-2 px-4 rounded disabled:opacity-50"
+                >
+                  {{
+                    isLoadingGallery ? "Loading gallery..." : "Sign in with Shoebox"
+                  }}
+                </button>
+                <p class="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                  Share one gallery; its photos become the mosaic tiles.
+                </p>
+              </template>
+              <template v-else>
+                <p class="text-gray-700 dark:text-gray-300">
+                  Gallery
+                  <span class="font-semibold">{{ gallery.name }}</span>
+                  with {{ gallery.photos.length }} photos
+                </p>
+                <button
+                  @click="signOut"
+                  class="mt-2 text-sm text-gray-500 dark:text-gray-400 underline"
+                >
+                  Sign out
+                </button>
+              </template>
             </div>
 
             <div
+              v-if="gallery"
               class="bg-white dark:bg-gray-800 shadow-md rounded-lg p-6 mb-8"
             >
               <h2
                 class="text-xl font-semibold mb-4 text-gray-900 dark:text-white"
               >
-                2. Upload Pool Photos
+                2. Select Target Photo
               </h2>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                @change="handlePoolPhotosUpload"
-                class="mb-4"
-                aria-label="Upload pool photos"
-              />
-              <div v-if="poolPhotos.length > 0" class="grid grid-cols-4 gap-2">
-                <div
-                  v-for="(photo, index) in poolPhotos"
-                  :key="index"
-                  class="relative"
+              <p class="mb-4 text-sm text-gray-500 dark:text-gray-400">
+                Click the photo to rebuild. All gallery photos are the pool.
+              </p>
+              <div class="grid grid-cols-4 gap-2">
+                <button
+                  v-for="photo in gallery.photos"
+                  :key="photo.id"
+                  @click="targetPhoto = photo.url"
+                  :aria-pressed="targetPhoto === photo.url"
+                  :aria-label="`Use ${photo.name} as target`"
+                  :class="
+                    targetPhoto === photo.url
+                      ? 'ring-2 ring-blue-500'
+                      : 'opacity-75 hover:opacity-100'
+                  "
+                  class="rounded"
                 >
                   <img
-                    :src="photo"
-                    alt="Pool Photo"
+                    :src="photo.url"
+                    :alt="photo.name"
                     class="w-16 h-16 object-cover rounded"
                   />
-                  <button
-                    @click="deletePoolPhoto(index)"
-                    class="absolute top-0 left-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs"
-                    aria-label="Delete photo"
-                  >
-                    ×
-                  </button>
-                </div>
+                </button>
+              </div>
+              <div v-if="targetPhoto" class="mt-4 flex justify-center">
+                <img
+                  :src="targetPhoto"
+                  alt="Target Photo"
+                  class="max-w-full h-auto max-h-64 object-contain"
+                />
               </div>
             </div>
 
@@ -334,7 +354,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useHead } from "#imports";
 import { useRuntimeConfig } from "#app";
 import { ChevronUpIcon } from "@heroicons/vue/24/solid";
@@ -343,9 +363,19 @@ import {
   DisclosureButton as HeadlessDisclosureButton,
   DisclosurePanel as HeadlessDisclosurePanel,
 } from "@headlessui/vue";
+import {
+  completeSignIn,
+  loadGallery,
+  signInWithShoebox,
+  signOutOfShoebox,
+} from "~/utils/shoebox";
 
+// The Shoebox gallery the user shared: { id, name, photos: [{ id, name, url }] }
+const gallery = ref(null);
+const isLoadingGallery = ref(false);
+// URL of the gallery photo to rebuild; every gallery photo is a pool tile
 const targetPhoto = ref(null);
-const poolPhotos = ref([]);
+const poolPhotos = computed(() => gallery.value?.photos.map((p) => p.url) ?? []);
 const mosaicImage = ref(null);
 const isGenerating = ref(false);
 const progress = ref("");
@@ -372,6 +402,14 @@ useHead({
 onMounted(() => {
   console.log("Component mounted");
   initializeWorker();
+
+  // Back from Shoebox with ?code=…? Finish the sign-in, then load the shared gallery.
+  isLoadingGallery.value = true;
+  completeSignIn()
+    .then((token) => token && loadGallery(token))
+    .then((shared) => (gallery.value = shared || null))
+    .catch((e) => alert(e.message))
+    .finally(() => (isLoadingGallery.value = false));
 
   // Initialize dark mode based on user preference
   if (
@@ -412,6 +450,12 @@ const closeSidebar = () => {
 
 const toggleDarkMode = () => {
   isDarkMode.value = !isDarkMode.value;
+};
+
+const signOut = () => {
+  signOutOfShoebox();
+  gallery.value = null;
+  targetPhoto.value = null;
 };
 
 const initializeWorker = () => {
@@ -458,37 +502,6 @@ const handleError = (errorMessage) => {
   clearInterval(elapsedTimeInterval);
 };
 
-const handleTargetPhotoUpload = (event) => {
-  const file = event.target.files[0];
-  if (file) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      targetPhoto.value = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  }
-};
-
-const handlePoolPhotosUpload = (event) => {
-  const files = event.target.files;
-  if (files) {
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const newImage = e.target.result;
-        if (!poolPhotos.value.includes(newImage)) {
-          poolPhotos.value.push(newImage);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-};
-
-const deletePoolPhoto = (index) => {
-  poolPhotos.value.splice(index, 1);
-};
-
 const generateMosaic = async () => {
   if (!targetPhoto.value || poolPhotos.value.length === 0 || !worker) return;
 
@@ -506,7 +519,7 @@ const generateMosaic = async () => {
   }, 1000);
 
   try {
-    // Convert data URIs to ArrayBuffers
+    // Download the photos (presigned Shoebox URLs) as ArrayBuffers
     const targetBuffer = await fetch(targetPhoto.value).then((r) =>
       r.arrayBuffer()
     );

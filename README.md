@@ -2,11 +2,13 @@
 
 A Vue.js application that generates photo mosaics by combining a target image with a pool of smaller images. Built with Nuxt 3 and Tailwind CSS, this application processes images client-side using Web Workers for optimal performance. This project was created by v0, an advanced AI coding assistant.
 
+This fork signs in with [Shoebox](https://shoebox.appwrite.network), a private photo gallery that is also an OAuth2 provider. The photos of the gallery you share are the mosaic pool, and the target photo is one of them. Deployed at https://mosaic.appwrite.network.
+
 ## Features
 
-- Upload a target photo to be transformed into a mosaic
-- Add multiple photos to create a pool of images for the mosaic
-- Delete individual photos from the pool
+- Sign in with Shoebox and share one gallery
+- Every photo of that gallery is the pool of images for the mosaic
+- Pick any gallery photo as the target to be transformed into a mosaic
 - Adjust tile size for the mosaic
 - Adjust color balance between the original image and the mosaic tiles
 - Cancel mosaic generation at any time
@@ -19,6 +21,8 @@ A Vue.js application that generates photo mosaics by combining a target image wi
 
 ## Recent Updates
 
+- Replaced the file pickers with "Sign in with Shoebox" (OAuth 2.1 authorization code flow with PKCE)
+- Pool photos are prepared once in the Web Worker (centred square thumbnails with cached average colours) so full-size gallery photos work; the target is capped at 2048px on its longest side
 - Added a collapsible "Important Information" section using Headless UI components
 - Implemented tooltips for Tile Size and Color Adjustment sliders
 - Updated ChevronUpIcon import to use "@heroicons/vue/24/solid"
@@ -30,6 +34,49 @@ A Vue.js application that generates photo mosaics by combining a target image wi
 
 - **Tile Size**: Determines the size of each mosaic tile. Smaller values create more detailed mosaics but take longer to generate.
 - **Color Adjustment**: Controls the balance between the original image colors and the mosaic tile colors. Higher values result in a mosaic that's closer to the original image colors.
+
+## Sign in with Shoebox
+
+`utils/shoebox.ts` is the whole integration. Shoebox is an Appwrite project
+whose OAuth2 server is enabled, and this app is registered there as a
+**public** client (`6ab512350005925f9297`), so it never holds a secret:
+
+1. **Sign in with Shoebox** builds a PKCE verifier and challenge, stores them
+   in `sessionStorage`, and sends the browser to the authorize endpoint with
+   `scope=openid gallery.read`.
+2. Shoebox shows its consent screen, where the user picks exactly one gallery
+   (a Rich Authorization Request detail of type `gallery`).
+3. Shoebox redirects back to this page with `?code=…&state=…`. On load the app
+   swaps the code for an access token at the token endpoint, sending the PKCE
+   verifier instead of a client secret, and cleans the URL.
+4. With the token it calls Shoebox's gallery API
+   (`https://shoebox-gallery-api.fra.appwrite.run`), which returns the shared
+   gallery's photos as presigned URLs valid for an hour. All of them become the
+   pool; clicking one makes it the target.
+
+The token lives in `sessionStorage`, so it is gone when the tab closes.
+**Sign out** just forgets it.
+
+The redirect URI is the page itself, with a trailing slash. These must be
+registered on the Shoebox client:
+
+```
+http://localhost:3000/
+https://mosaic.appwrite.network/
+```
+
+Discovery document:
+`https://fra.cloud.appwrite.io/v1/oauth2/6ab43a98000b9aedd03c/.well-known/openid-configuration`
+
+## Deploy
+
+The app is an Appwrite Site in the Shoebox project, built as a static Nuxt
+site (`npm run generate`, output `.output/public`) and described in
+`appwrite.config.json`. Redeploy with:
+
+```sh
+appwrite push site
+```
 
 ## Prerequisites
 
@@ -77,9 +124,12 @@ Before you begin, ensure you have the following installed:
 mosaic-generator/
 ├── pages/
 │   └── index.vue      # Main application component
+├── utils/
+│   └── shoebox.ts     # Sign in with Shoebox (OAuth2 + PKCE) and the gallery API
 ├── public/
 │   └── mosaic-worker.js    # Web Worker for image processing
 ├── nuxt.config.ts     # Nuxt configuration
+├── appwrite.config.json # Appwrite Site definition for `appwrite push site`
 └── package.json       # Project dependencies
 ```
 
@@ -87,10 +137,11 @@ mosaic-generator/
 
 ### Main Logic
 
-1. **Image Upload**
+1. **Photos**
 
-    1. The target photo is uploaded and displayed
-    2. Pool photos can be added multiple times and deleted individually
+    1. The user signs in with Shoebox and shares one gallery
+    2. Every photo in it is downloaded from a presigned URL and becomes the pool
+    3. The target photo is whichever gallery photo the user clicks
 
 2. **Mosaic Generation**
 
@@ -117,44 +168,31 @@ mosaic-generator/
 
 ## Usage
 
-1. **Upload Target Photo**
+1. **Sign in with Shoebox**
 
-    1. Click on the "Select target photo" input to choose your main image
+    1. Click "Sign in with Shoebox" and sign in to your Shoebox account
+    2. On the consent screen, pick the gallery to share and click Allow
+    3. You come back here with that gallery loaded; every photo in it is the pool
 
-2. **Add Pool Photos**
+2. **Select Target Photo**
 
-    1. Use the "Upload pool photos" input to select multiple images for your mosaic tiles
-    2. You can add more photos at any time
+    1. Click one of the gallery photos; it is shown larger underneath
 
-3. **Manage Pool Photos**
+3. **Adjust Parameters**
 
-    1. Delete unwanted photos from the pool by clicking the "×" button on each image
+    1. Use the sliders to set the tile size and color adjustment
+    2. Click the "?" buttons for more information about each parameter
 
-4. **Adjust Mosaic Parameters**
+4. **Generate Mosaic**
 
-    1. Use the "Tile Size" slider to set the size of mosaic tiles
-    2. Use the "Color Adjustment" slider to balance between original and mosaic colors
+    1. Click "Generate Mosaic" to start the process
+    2. Watch the progress in the loading overlay
+    3. Use the "Cancel Generation" button if you want to stop the process
 
-5. **Generate Mosaic**
+5. **View and Download**
 
-    1. Click the "Generate Mosaic" button to start the process
-    2. A progress indicator will show the current status and elapsed time
-
-6. **Cancel Generation**
-
-    1. If needed, click the "Cancel Generation" button to stop the process
-
-7. **View Result**
-
-    1. Once complete, the generated mosaic will appear in the "Result" section
-
-8. **Download Mosaic**
-
-    1. Click the "Download Mosaic" button to save the generated image
-
-9. **Toggle Dark Mode**
-
-    1. Use the dark mode toggle in the top right corner to switch between light and dark modes
+    1. Once complete, the mosaic will appear in the result section
+    2. Click "Download Mosaic" to save the image
 
 ## Development
 

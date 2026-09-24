@@ -1,0 +1,30 @@
+{
+    "projectId": "6ab43a98000b9aedd03c",
+    "projectName": "Shoebox",
+    "endpoint": "https://fra.cloud.appwrite.io/v1",
+    "sites": [
+        {
+            "$id": "mosaic-generator",
+            "name": "Mosaic Generator",
+            "path": ".",
+            "framework": "nuxt",
+            "logging": true,
+            "timeout": 30,
+            "buildRuntime": "node-22",
+            "adapter": "static",
+            "installCommand": "npm install",
+            "buildCommand": "npm run generate",
+            "outputDirectory": "./.output/public",
+            "fallbackFile": "",
+            "installationId": "",
+            "providerRepositoryId": "",
+            "providerBranch": "",
+            "providerSilentMode": false,
+            "providerRootDirectory": "",
+            "startCommand": "",
+            "buildSpecification": "s-2vcpu-2gb",
+            "runtimeSpecification": "s-0.5vcpu-512mb",
+            "deploymentRetention": 0
+        }
+    ]
+}

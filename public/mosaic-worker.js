@@ -97,12 +97,19 @@ self.onmessage = async function (e) {
   }
 };
 
+// Pool photos come straight from a Shoebox gallery, so they can be full-size
+// camera files. Each is reduced once to a small centred square with its average
+// colour, instead of being rescanned for every tile.
+const TILE_PX = 128;
+// Longest side of the target. Phone photos are much larger; this keeps generation quick.
+const MAX_TARGET_PX = 2048;
+
 async function processMosaic() {
   try {
     console.log("Processing mosaic started");
     self.postMessage({ progress: "Processing images...", percentage: 0 });
 
-    // Convert ArrayBuffers to Blobs
+    // Convert ArrayBuffers to Blobs (the type is a hint; decoding sniffs the real format)
     const targetBlob = new Blob([targetBuffer], { type: "image/png" });
     const poolBlobs = poolBuffers.map(
       (buffer) => new Blob([buffer], { type: "image/png" })
@@ -115,11 +122,16 @@ async function processMosaic() {
       poolBlobs.length
     );
 
-    // Load images
-    const [targetImg, ...poolImgs] = await Promise.all([
-      createImageBitmap(targetBlob),
-      ...poolBlobs.map((blob) => createImageBitmap(blob)),
-    ]);
+    // Load images, one pool photo at a time to keep memory low
+    const targetImg = await createImageBitmap(targetBlob);
+    const pool = [];
+    for (const blob of poolBlobs) {
+      pool.push(await poolTile(blob));
+      self.postMessage({
+        progress: `Prepared ${pool.length}/${poolBlobs.length} pool photos`,
+        percentage: Math.floor((pool.length / poolBlobs.length) * 5),
+      });
+    }
 
     console.log(
       "Images loaded. Target size:",
@@ -127,13 +139,17 @@ async function processMosaic() {
       "x",
       targetImg.height,
       "Pool images:",
-      poolImgs.length
+      pool.length
     );
     self.postMessage({ progress: "Generating mosaic...", percentage: 5 });
 
+    const scale = Math.min(
+      1,
+      MAX_TARGET_PX / Math.max(targetImg.width, targetImg.height)
+    );
     const canvas = new OffscreenCanvas(
-      Math.floor(targetImg.width / tileSize) * tileSize,
-      Math.floor(targetImg.height / tileSize) * tileSize
+      Math.floor((targetImg.width * scale) / tileSize) * tileSize,
+      Math.floor((targetImg.height * scale) / tileSize) * tileSize
     );
     const ctx = canvas.getContext("2d");
 
@@ -148,6 +164,7 @@ async function processMosaic() {
 
     // Draw target image
     ctx.drawImage(targetImg, 0, 0, canvas.width, canvas.height);
+    targetImg.close();
 
     // Create mosaic
     const totalTiles = (canvas.width / tileSize) * (canvas.height / tileSize);
@@ -159,7 +176,7 @@ async function processMosaic() {
       for (let x = 0; x < canvas.width; x += tileSize) {
         const imageData = ctx.getImageData(x, y, tileSize, tileSize);
         const avgColor = getAverageColor(imageData.data);
-        const bestMatch = findBestMatch(avgColor, poolImgs);
+        const bestMatch = findBestMatch(avgColor, pool);
 
         // Apply color adjustment
         ctx.globalAlpha = colorAdjustment;
@@ -212,6 +229,28 @@ async function processMosaic() {
   }
 }
 
+/** A TILE_PX square cut from the centre of the photo, plus its average colour. */
+async function poolTile(blob) {
+  const img = await createImageBitmap(blob);
+  const side = Math.min(img.width, img.height);
+  const canvas = new OffscreenCanvas(TILE_PX, TILE_PX);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(
+    img,
+    (img.width - side) / 2,
+    (img.height - side) / 2,
+    side,
+    side,
+    0,
+    0,
+    TILE_PX,
+    TILE_PX
+  );
+  img.close();
+  const color = getAverageColor(ctx.getImageData(0, 0, TILE_PX, TILE_PX).data);
+  return { canvas, color };
+}
+
 function getAverageColor(data) {
   let r = 0,
     g = 0,
@@ -225,25 +264,19 @@ function getAverageColor(data) {
   return [r / count, g / count, b / count];
 }
 
-function findBestMatch(targetColor, poolImgs) {
-  let bestMatch = poolImgs[0];
+function findBestMatch(targetColor, pool) {
+  let bestMatch = pool[0];
   let minDifference = Infinity;
 
-  for (const img of poolImgs) {
-    const canvas = new OffscreenCanvas(img.width, img.height);
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(img, 0, 0);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const avgColor = getAverageColor(imageData.data);
-    const difference = colorDifference(targetColor, avgColor);
-
+  for (const tile of pool) {
+    const difference = colorDifference(targetColor, tile.color);
     if (difference < minDifference) {
       minDifference = difference;
-      bestMatch = img;
+      bestMatch = tile;
     }
   }
 
-  return bestMatch;
+  return bestMatch.canvas;
 }
 
 function colorDifference(color1, color2) {
