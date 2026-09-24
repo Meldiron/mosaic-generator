@@ -15,7 +15,7 @@
             "installCommand": "npm install",
             "buildCommand": "npm run generate",
             "outputDirectory": "./.output/public",
-            "fallbackFile": "",
+            "fallbackFile": "200.html",
             "installationId": "",
             "providerRepositoryId": "",
             "providerBranch": "",

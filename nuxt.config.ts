@@ -16,6 +16,12 @@ export default defineNuxtConfig({
       version: '1.5.0'
     }
   },
+  // Always emit index.html for /, whatever the build host's prerender settings are
+  nitro: {
+    prerender: {
+      routes: ['/'],
+    },
+  },
   compatibilityDate: '2024-11-20',
   components: [
     {
