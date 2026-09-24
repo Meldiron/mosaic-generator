@@ -125,12 +125,19 @@ async function processMosaic() {
     // Load images, one pool photo at a time to keep memory low
     const targetImg = await createImageBitmap(targetBlob);
     const pool = [];
-    for (const blob of poolBlobs) {
-      pool.push(await poolTile(blob));
+    for (const [i, blob] of poolBlobs.entries()) {
+      try {
+        pool.push(await poolTile(blob));
+      } catch {
+        // Not an image this browser can decode (for example HEIC in Chrome); skip it
+      }
       self.postMessage({
-        progress: `Prepared ${pool.length}/${poolBlobs.length} pool photos`,
-        percentage: Math.floor((pool.length / poolBlobs.length) * 5),
+        progress: `Prepared ${i + 1}/${poolBlobs.length} pool photos`,
+        percentage: Math.floor(((i + 1) / poolBlobs.length) * 5),
       });
+    }
+    if (pool.length === 0) {
+      throw new Error("Failed to process pool photos: none could be decoded");
     }
 
     console.log(
